@@ -1,0 +1,24 @@
+{
+  "llm": {
+    "base_url": "",
+    "model": ""
+  },
+  "scan": {
+    "days": 14,
+    "min_views": 50000,
+    "viral_factor": 3,
+    "max_per_channel": 10,
+    "video_kinds": [
+      "video",
+      "reel"
+    ],
+    "dedupe_threshold": 0.5,
+    "delay_min_s": 3,
+    "delay_max_s": 8,
+    "page_delay_min_s": 30,
+    "page_delay_max_s": 60,
+    "max_videos_per_page": 200,
+    "max_scroll_rounds": 60,
+    "stall_rounds": 4
+  }
+}

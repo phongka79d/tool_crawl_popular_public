@@ -1,0 +1,56 @@
+import { el } from "../../components/dom.js";
+import { button, card, badge, alert, progressBar, dataTable, expander } from "../../components/index.js";
+import { num, duration } from "../../format.js";
+export function scanProgress(state, logs, actions, view) {
+  const root = el("div", "stack");
+  if (state.running) {
+    const main = card({ title: `Đang quét · ${duration(state.elapsed_s)}` });
+    main.body.classList.add("stack");
+    main.body.append(progressBar({ value: state.overall, label: `Tiến độ tổng (ước tính) · ${Math.round((state.overall || 0) * 100)}%`, showValue: false }));
+    if (state.message)
+      main.body.append(el("p", "scan-current-message", state.message));
+    main.body.append(el("div", "scan-lanes", (state.lanes || []).map((lane, index) => lanePanel(lane, index))));
+    main.body.append(button({ label: "Dừng quét", variant: "danger", disabled: state.stopping || actions.pending(), onClick: actions.stop }));
+    if (state.stopping)
+      main.body.append(alert({ message: "Đã yêu cầu dừng. Đang hoàn tất bước hiện tại và lưu kết quả đã xử lý." }));
+    root.append(main);
+    if (state.channels?.length)
+      root.append(card({ title: "Tiến độ từng kênh", body: dataTable({ rows: state.channels, columns: [
+        { key: "name", label: "Kênh" },
+        { key: "url", label: "Link", format: (url) => button({ label: "Mở kênh", variant: "ghost", size: "small", onClick: () => actions.openUrl(url) }) },
+        { key: "status", label: "Trạng thái" },
+        { key: "progress", label: "Tiến độ", type: "progress" },
+        { key: "found", label: "Tìm thấy", format: num },
+        { key: "passed", label: "Đạt ngưỡng", format: num },
+        { key: "transcribed", label: "Đã chép lời", format: num }
+      ] }) }));
+    if (logs.length)
+      root.append(card({ title: "Diễn biến gần nhất", body: el("pre", "scan-log", logs.slice(-8).join(`
+`)) }));
+  } else {
+    if (state.result) {
+      const result = state.result;
+      root.append(card({ title: `✅ Quét xong${result.count == null ? "" : ` · ${num(result.count)} ${state.item_label}`}`, subtitle: `File: ${result.name} · tổng thời gian ${duration(result.elapsed_s)}`, body: el("div", "row", button({ label: "Mở file Excel", variant: "primary", icon: "external", disabled: actions.pending(), onClick: () => actions.file("open_result", result.name) }), button({ label: "Lưu bản sao…", icon: "folder", disabled: actions.pending(), onClick: () => actions.file("save_result_as", result.name) }), button({ label: "Xem trong Kết quả", icon: "results", onClick: actions.results }), button({ label: "Quét lần mới", onClick: actions.reset })) }));
+    } else if (state.ended_without_result)
+      root.append(alert({ message: "Đã kết thúc quét; không có file Excel mới." }), button({ label: "Quét lần mới", onClick: actions.reset }));
+  }
+  for (const message of new Set(state.errors || []))
+    root.append(alert({ variant: "error", message }));
+  if (state.errors?.length)
+    root.append(el("p", "hint", "Chi tiết kỹ thuật của từng lỗi nằm trong Nhật ký (nút ở góc trên bên phải)."));
+  if (logs.length)
+    root.append(expander({ title: `Toàn bộ diễn biến lần quét (${num(logs.length)} bước)`, body: el("pre", "scan-log scan-log-full", logs.join(`
+`)), open: view.logs, onToggle: (value) => view.logs = value }));
+  return root;
+}
+const LANE_BADGES = { current: ["● Đang chạy", "current"], waiting: ["◌ Chờ kênh tiếp theo", "pending"], pending: ["○ Chưa bắt đầu", "pending"], done: ["✓ Xong", "success"] };
+function lanePanel(lane, index) {
+  const [label, state] = LANE_BADGES[lane.state] || LANE_BADGES.pending;
+  const panel = el("section", `scan-lane scan-lane-${lane.state}`, el("div", "scan-lane-head", el("h4", "", `${index + 1} · ${lane.title}`), badge({ label, state })), progressBar({ value: lane.fraction, label: lane.label }), el("p", "scan-current-message", lane.message || "—"));
+  if (lane.page_url) {
+    const link = el("a", "hint", lane.page_url);
+    link.href = lane.page_url;
+    panel.append(link);
+  }
+  return panel;
+}

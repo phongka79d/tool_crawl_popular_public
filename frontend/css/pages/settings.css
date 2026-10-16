@@ -1,0 +1,59 @@
+.settings-page {
+  gap: 20px;
+}
+
+
+.settings-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.settings-controls > section {
+  gap: 12px;
+}
+
+.settings-controls > section > h2 {
+  font-size: var(--fs-xl);
+}
+
+.settings-controls .badge {
+  align-self: flex-start;
+}
+
+.settings-connections {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.settings-connections > div {
+  min-width: 0;
+}
+
+.settings-connections .card-body > .stack {
+  gap: 14px;
+}
+
+.settings-channel-editor textarea {
+  min-height: 200px;
+  font: var(--fs-sm) / 1.7 var(--mono);
+}
+
+.settings-controls:disabled input,
+.settings-controls:disabled textarea,
+.settings-controls:disabled select {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+@media (max-width: 1000px) {
+  .settings-connections {
+    grid-template-columns: 1fr;
+  }
+}

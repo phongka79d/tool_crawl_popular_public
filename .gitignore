@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Dữ liệu khi chạy: phiên Facebook, cookie, cache, model Whisper, kết quả Excel
+profile/
+data/
+output/
+tests/fixtures/live/

@@ -1,0 +1,274 @@
+import threading
+from types import SimpleNamespace
+import pytest
+from backend.core import config, db
+from backend.core.models import Page, Video
+from backend.core.errors import LoginRequired, ServiceError
+from backend.services import pipeline
+
+TEXT = 'Đây là một kịch bản tiếng Việt có đầy đủ lời nói để lưu và xuất thành nội dung.'
+PAGE = 'https://www.facebook.com/Example'
+
+
+@pytest.fixture
+def harness(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, 'DATA_DIR', tmp_path / 'data')
+    monkeypatch.setattr(config, 'DB_PATH', tmp_path / 'data/cache.db')
+    monkeypatch.setattr(config, 'OUTPUT_DIR', tmp_path / 'output')
+    monkeypatch.setattr(config, 'PROFILE_DIR', tmp_path / 'profile')
+    monkeypatch.setattr(config, 'load_lines', lambda _: [PAGE])
+    state = SimpleNamespace(rows=[{'video_id': '1', 'url': 'https://example/1', 'views': 100000,
+                                   'posted_at': 1900000000, 'format': 'video'}],
+                            login=None, failure=None, calls=[], events=[], pauses=[], stop=threading.Event())
+    class Scanner:
+        scan_errors = []
+        def __init__(self, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def check_login(self):
+            if state.login:
+                raise state.login
+        def get_page_info(self, url):
+            return Page(url, 'Example', 0)
+        def scan_page(self, *args, **kwargs):
+            if state.failure:
+                raise state.failure
+            return state.rows
+        def polite_page_pause(self, **kwargs):
+            state.pauses.append(True)
+    monkeypatch.setattr(pipeline, 'FacebookScanner', Scanner)
+    monkeypatch.setattr(pipeline.ytdlp, 'fill_missing', lambda v: state.calls.append(('metadata', v.video_id)))
+    def transcribe(video, worker, stop):
+        state.calls.append(('transcribe', video.video_id))
+        video.transcript = TEXT
+        video.transcript_status = 'ok'
+        return TEXT, 'ok'
+    monkeypatch.setattr(pipeline.transcript, 'get_transcript', transcribe)
+    state.run = lambda: pipeline.run(pipeline.RunParams(viral_factor=1), config.DEFAULT_SETTINGS,
+                                     state.stop, state.events.append)
+    return state
+
+
+def test_scan_transcribe_export_history_and_progress(harness):
+    state = harness
+    path = state.run()
+    assert path.exists() and ('transcribe', '1') in state.calls
+    assert db.get_taken('1')['status'] == 'taken'
+    complete = [event for event in state.events if event.found is not None]
+    assert len(complete) == 1 and (complete[0].found, complete[0].passed) == (1, 1)
+    assert complete[0].page_url == PAGE
+    assert state.events[-1].stage == 'done' and state.events[-1].done
+    summary = pipeline.export_excel.read_summary(path)
+    assert summary['new'] == 1
+
+
+def test_taken_reused_without_transcription(harness):
+    state = harness
+    config.ensure_dirs()
+    db.init_db()
+    db.save_taken(Video('1', 'https://example/1', PAGE, page_name='Example', transcript=TEXT),
+                  'taken', '2026-10-01')
+    path = state.run()
+    assert not any(call[0] == 'transcribe' for call in state.calls)
+    summary = pipeline.export_excel.read_summary(path)
+    assert summary['taken_before'] == 1 and summary['top'][0]['status'] == 'Đã lấy ngày 01/10'
+    assert summary['top'][0]['transcript'] == TEXT
+
+
+@pytest.mark.parametrize('status', ['duplicate_script', 'no_speech'])
+def test_history_skip_is_silent(harness, status):
+    config.ensure_dirs()
+    db.init_db()
+    db.save_taken(Video('1', '1', PAGE), status, '2026-10-01')
+    path = harness.run()
+    assert pipeline.export_excel.read_summary(path)['total'] == 0
+    assert not any(call[0] == 'transcribe' for call in harness.calls)
+
+
+def test_partial_rows_survive_service_failure(harness):
+    error = ServiceError('facebook', 'mất kết nối')
+    error.partial_rows = harness.rows
+    harness.failure = error
+    path = harness.run()
+    result = pipeline.export_excel.read_summary(path)
+    assert result['new'] == 1 and result['errors'] == ['LỖI: mất kết nối']
+
+
+def test_login_failure_has_no_export(harness):
+    harness.login = LoginRequired('facebook', 'Cần đăng nhập')
+    assert harness.run() is None
+    assert not harness.calls
+
+
+def test_metadata_before_viral_filter(harness, monkeypatch):
+    harness.rows[0]['posted_at'] = None
+    harness.rows[0]['views'] = None
+    def fill(video):
+        video.views = 100000
+        video.posted_at = 1900000000
+        harness.calls.append(('metadata', video.video_id))
+    monkeypatch.setattr(pipeline.ytdlp, 'fill_missing', fill)
+    assert harness.run() is not None
+    assert harness.calls[:2] == [('metadata', '1'), ('transcribe', '1')]
+
+
+def test_no_speech_history(harness, monkeypatch):
+    def transcribe(video, *args):
+        video.transcript = 'ngắn'
+        return 'ngắn', 'no_speech'
+    monkeypatch.setattr(pipeline.transcript, 'get_transcript', transcribe)
+    result = pipeline.export_excel.read_summary(harness.run())
+    assert result['new'] == 0
+    assert result['notes'] == ['Bỏ qua (không có lời nói): https://example/1']
+    assert db.get_taken('1')['status'] == 'no_speech'
+
+
+def test_stop_before_any_data_has_no_export(harness):
+    harness.stop.set()
+    assert harness.run() is None
+
+
+def test_cli_forwards_public_options(monkeypatch):
+    captured = []
+    monkeypatch.setattr(pipeline, 'run', lambda params, **kwargs: captured.append(params) or 'output.xlsx')
+    assert pipeline.main(['--days', '7', '--min-views', '123', '--viral-factor', '2',
+                          '--max-per-channel', '4', '--formats', 'reel']) == 0
+    params = captured[0]
+    assert (params.days, params.min_views, params.viral_factor, params.max_per_channel, params.formats) == (
+        7, 123, 2, 4, frozenset({'reel'}))
+
+
+def test_batch_script_group_and_history_dedupe(harness):
+    harness.rows.append(dict(harness.rows[0], video_id='2', url='https://example/2'))
+    path = harness.run()
+    assert pipeline.export_excel.read_summary(path)['total'] == 1
+    assert db.get_taken('1')['status'] == 'taken'
+    assert db.get_taken('2')['status'] == 'duplicate_script'
+    harness.rows = [dict(harness.rows[0], video_id='3', url='https://example/3')]
+    result = pipeline.export_excel.read_summary(harness.run())
+    assert result['total'] == 0
+    assert any('kịch bản đã lấy ngày' in note for note in result['notes'])
+    assert db.get_taken('3')['status'] == 'duplicate_script'
+
+
+def test_stop_after_transcription_exports_completed_work(harness, monkeypatch):
+    harness.rows.append(dict(harness.rows[0], video_id='2', url='https://example/2'))
+    def transcribe(video, *args):
+        video.transcript = TEXT
+        harness.stop.set()
+        return TEXT, 'ok'
+    monkeypatch.setattr(pipeline.transcript, 'get_transcript', transcribe)
+    path = harness.run()
+    assert pipeline.export_excel.read_summary(path)['new'] == 1
+    assert db.get_taken('2') is None
+
+
+def test_invalid_channel_skipped_and_between_channel_pause(harness, monkeypatch):
+    other = 'https://www.facebook.com/Other'
+    monkeypatch.setattr(config, 'load_lines', lambda _: ['not-a-page', PAGE, other])
+    path = harness.run()
+    assert path.exists() and len(harness.pauses) == 1
+    assert any(event.found == 0 and event.passed == 0 for event in harness.events)
+
+
+def enable_llm(harness, monkeypatch):
+    from copy import deepcopy
+    settings = deepcopy(config.DEFAULT_SETTINGS)
+    settings['llm'] = {'base_url': 'https://example.com/v1', 'model': 'model'}
+    monkeypatch.setattr(pipeline.keys, 'get_key', lambda: 'pipeline-test-credential')
+    monkeypatch.setattr(pipeline.llm_client, 'check_key', lambda *args: None)
+    harness.run = lambda: pipeline.run(pipeline.RunParams(viral_factor=1), settings,
+                                      harness.stop, harness.events.append)
+
+
+def test_without_key_makes_no_llm_calls(harness, monkeypatch):
+    monkeypatch.setattr(pipeline.llm_client, 'check_key', lambda *args: pytest.fail('unexpected check'))
+    monkeypatch.setattr(pipeline.llm_client, 'enhance_batch', lambda *args: pytest.fail('unexpected AI'))
+    assert harness.run()
+
+
+def test_enhanced_excel_raw_history_and_reuse(harness, monkeypatch):
+    enable_llm(harness, monkeypatch)
+    cleaned = 'Lời thoại đã sửa, khác hoàn toàn bản gốc để kiểm tra lọc trùng.'
+    calls = []
+    def enhance(*args):
+        calls.append([v.video_id for v in args[-1]])
+        return {'1': {'co_loi_noi': True, 'thoai': cleaned}}
+    monkeypatch.setattr(pipeline.llm_client, 'enhance_batch', enhance)
+    result = pipeline.export_excel.read_summary(harness.run())
+    assert result['top'][0]['transcript'] == cleaned
+    assert db.get_taken('1')['transcript'] == TEXT
+    assert db.get_taken('1')['transcript_clean'] == cleaned
+    assert any(event.stage == 'enhance' for event in harness.events)
+    assert pipeline.export_excel.read_summary(harness.run())['top'][0]['transcript'] == cleaned
+    assert calls == [['1']]
+    harness.rows = [dict(harness.rows[0], video_id='2')]
+    assert pipeline.export_excel.read_summary(harness.run())['total'] == 0
+    assert db.get_taken('2')['status'] == 'duplicate_script'
+    assert calls == [['1']]
+
+
+def test_enhancement_failure_keeps_raw_and_note(harness, monkeypatch):
+    enable_llm(harness, monkeypatch)
+    def fail(*args):
+        raise RuntimeError('network unavailable')
+    monkeypatch.setattr(pipeline.llm_client, 'enhance_batch', fail)
+    result = pipeline.export_excel.read_summary(harness.run())
+    assert result['top'][0]['transcript'] == TEXT
+    assert result['errors'] == ['LỖI: Không cải thiện được lời thoại: network unavailable']
+    assert not db.get_taken('1')['transcript_clean']
+
+
+def test_key_precheck_failure_does_not_gate_scan(harness, monkeypatch):
+    enable_llm(harness, monkeypatch)
+    def fail(*args):
+        raise RuntimeError('invalid credential')
+    monkeypatch.setattr(pipeline.llm_client, 'check_key', fail)
+    monkeypatch.setattr(pipeline.llm_client, 'enhance_batch', lambda *args: pytest.fail('disabled'))
+    result = pipeline.export_excel.read_summary(harness.run())
+    assert result['total'] == 1
+    assert 'Không cải thiện được lời thoại' in result['errors'][0]
+
+
+def test_llm_no_speech_drops_row(harness, monkeypatch):
+    enable_llm(harness, monkeypatch)
+    monkeypatch.setattr(pipeline.llm_client, 'enhance_batch',
+                        lambda *args: {'1': {'co_loi_noi': False, 'thoai': ''}})
+    result = pipeline.export_excel.read_summary(harness.run())
+    assert result['total'] == 0
+    assert result['notes'] == ['Bỏ qua (nhạc / bài hát, không phải lời nói): https://example/1']
+    assert db.get_taken('1')['status'] == 'no_speech'
+
+
+@pytest.mark.parametrize('cancel,expected', [(False, [8, 1]), (True, [8])])
+def test_enhancement_batches_and_cancel_between_batches(harness, monkeypatch, cancel, expected):
+    enable_llm(harness, monkeypatch)
+    harness.rows = [dict(harness.rows[0], video_id=str(n), url=f'https://example/{n}') for n in range(9)]
+    # Isolate batching from script grouping; script dedupe has dedicated integration coverage.
+    monkeypatch.setattr(pipeline.filters, 'dedupe_scripts', lambda videos, *args: (videos, [], []))
+    sizes = []
+    def enhance(*args):
+        batch = args[-1]
+        sizes.append(len(batch))
+        if cancel:
+            harness.stop.set()
+        return {video.video_id: {'co_loi_noi': True, 'thoai': 'Đã sửa.'} for video in batch}
+    monkeypatch.setattr(pipeline.llm_client, 'enhance_batch', enhance)
+    result = pipeline.export_excel.read_summary(harness.run())
+    assert sizes == expected and result['total'] == 9
+    events = [event for event in harness.events if event.stage == 'enhance']
+    assert all(event.steps == 2 for event in events)
+
+
+def test_llm_failure_redacts_progress_and_excel(harness, monkeypatch):
+    enable_llm(harness, monkeypatch)
+    def fail(*args):
+        raise RuntimeError('provider echoed pipeline-test-credential')
+    monkeypatch.setattr(pipeline.llm_client, 'enhance_batch', fail)
+    result = pipeline.export_excel.read_summary(harness.run())
+    assert 'pipeline-test-credential' not in str(result)
+    assert 'pipeline-test-credential' not in str(harness.events)
+    assert '[đã che]' in result['errors'][0]

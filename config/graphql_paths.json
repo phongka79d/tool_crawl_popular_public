@@ -1,0 +1,118 @@
+{
+  "_doc": "JSON paths read by collectors/graphql.py. A path is a list of dict keys (strings) and list indices (integers); \"*\" means every item of a list. Alternatives normally use the first convertible value. Counters prefer exact integers over localized display strings such as \"1,2 Tr\"; reduced and i18n fields are always approximate, including numeric values. Flattened records privately track approximate counters so later exact views/reactions/comments/shares replace rounded values, while other fields remain first-wins. Paths for Story fields start at the Story node; comet_sections-wrapped and direct projections are supported. The feedback counter block merges every dict reached by feedback paths, including fb_reel_react_button and media. Deferred fragments sharing the Story node id merge into the Story first. Channel tiles merge with Story records by video_id. Page header paths start at a node whose __typename is in page_typenames; the profile header renderer's user is the page and its viewer is never read. Edit this file when Facebook changes its JSON; no rebuild is needed. Synthetic fixtures: tests/fixtures/graphql_sample.txt and tests/fixtures/initial_page.html.",
+  "story_typename": "Story",
+  "video_typename": "Video",
+  "post_id": [["post_id"]],
+  "creation_time": [["creation_time"]],
+  "permalink_url": [
+    ["permalink_url"],
+    ["attachments", "*", "media", "permalink_url"]
+  ],
+  "fallback_url": "https://www.facebook.com/watch/?v={video_id}",
+  "reel_url_marker": "/reel/",
+  "message": [
+    ["comet_sections", "content", "story", "message", "text"],
+    ["content", "story", "message", "text"],
+    ["message", "text"]
+  ],
+  "feedback": [
+    ["comet_sections", "feedback", "story", "story_ufi_container", "story", "feedback_context", "feedback_target_with_context", "comet_ufi_summary_and_actions_renderer", "feedback"],
+    ["feedback", "story", "story_ufi_container", "story", "feedback_context", "feedback_target_with_context", "comet_ufi_summary_and_actions_renderer", "feedback"],
+    ["feedback"],
+    ["fb_reel_react_button", "story", "feedback"],
+    ["attachments", "*", "media"]
+  ],
+  "media_typename": [
+    ["attachments", "*", "media", "__typename"],
+    ["attachments", "*", "styles", "attachment", "media", "__typename"],
+    ["attachments", "*", "all_subattachments", "nodes", "*", "media", "__typename"]
+  ],
+  "video_markers": [
+    ["associated_video", "id"],
+    ["video_view_count"]
+  ],
+  "duration_ms": [
+    ["attachments", "*", "styles", "attachment", "media", "playable_duration_in_ms"],
+    ["attachments", "*", "media", "playable_duration_in_ms"]
+  ],
+  "duration_s": [
+    ["attachments", "*", "styles", "attachment", "media", "length_in_second"],
+    ["attachments", "*", "media", "length_in_second"]
+  ],
+  "broadcast_status": [
+    ["attachments", "*", "media", "broadcast_status"],
+    ["attachments", "*", "styles", "attachment", "media", "broadcast_status"],
+    ["attachments", "*", "all_subattachments", "nodes", "*", "media", "broadcast_status"]
+  ],
+  "is_live_streaming": [
+    ["attachments", "*", "media", "is_live_streaming"],
+    ["attachments", "*", "styles", "attachment", "media", "is_live_streaming"],
+    ["attachments", "*", "all_subattachments", "nodes", "*", "media", "is_live_streaming"]
+  ],
+  "views": [
+    ["video_view_count"],
+    ["play_count"],
+    ["video_view_count_renderer", "feedback", "video_view_count"],
+    ["video_view_count_renderer", "feedback", "play_count"],
+    ["play_count_reduced"]
+  ],
+  "comments": [
+    ["adaptive_ufi_action_renderers", "*", "feedback", "comment_rendering_instance", "comments", "total_count"],
+    ["comments_count_summary_renderer", "feedback", "comment_rendering_instance", "comments", "total_count"],
+    ["comment_rendering_instance", "comments", "total_count"],
+    ["total_comment_count"]
+  ],
+  "shares": [
+    ["adaptive_ufi_action_renderers", "*", "feedback", "share_count", "count"],
+    ["share_count", "count"],
+    ["i18n_share_count"],
+    ["share_count_reduced"]
+  ],
+  "reactions": {
+    "total": [
+      ["reaction_count", "count"],
+      ["unified_reactors", "count"]
+    ],
+    "edges": [["top_reactions", "edges"]],
+    "edge_count": [["reaction_count"]],
+    "edge_id": [["node", "id"]],
+    "edge_name": [["node", "localized_name"]],
+    "approx": [["i18n_reaction_count"], ["reactors", "count_reduced"]],
+    "by_id": {
+      "1635855486666999": "LIKE",
+      "1678524932434102": "LOVE",
+      "613557422527005": "CARE",
+      "613557422527858": "CARE",
+      "115940658764963": "HAHA",
+      "478547315650144": "WOW",
+      "908563459236466": "SAD",
+      "444813342392137": "ANGRY"
+    },
+    "by_name": {
+      "Thích": "LIKE",
+      "Yêu thích": "LOVE",
+      "Thương thương": "CARE",
+      "Haha": "HAHA",
+      "Wow": "WOW",
+      "Buồn": "SAD",
+      "Phẫn nộ": "ANGRY"
+    }
+  },
+  "page_typenames": ["Page", "XFBProfileEntityConvergenceHeaderRenderer"],
+  "page_name": [["name"], ["user", "name"]],
+  "page_followers": [["followers_count"]],
+  "channel_video": {
+    "renderer_typenames": ["ChannelTabVideoThumbnailWithReactionsRenderer"],
+    "video": [["video"]],
+    "video_id": [["id"]],
+    "creation_time": [["publish_time"]],
+    "permalink_url": [["canonical_uri_with_fallback"], ["url"]],
+    "message": [["savable_title", "text"], ["title", "text"]],
+    "views": [["play_count"]],
+    "feedback": [["feedback"]],
+    "duration_ms": [["video_thumbnail_overlays_renderer", "video", "playable_duration_in_ms"]],
+    "duration_s": [["video_thumbnail_overlays_renderer", "video", "playable_duration"]],
+    "broadcast_status": [["video_thumbnail_overlays_renderer", "video", "broadcast_status"], ["broadcast_status"]],
+    "is_live_streaming": [["video_thumbnail_overlays_renderer", "video", "is_live_streaming"], ["is_live_streaming"]]
+  }
+}
