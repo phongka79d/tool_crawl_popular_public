@@ -16,12 +16,10 @@ def test_exact_threshold_and_minimum_domination():
     assert filters.select_channel(rows, min_views=301, viral_factor=3).videos == []
 
 
-def test_cap_and_each_channel_baseline():
+def test_cap_keeps_highest_views():
     rows = [video(n, n * 100) for n in range(1, 6)]
     assert [v.views for v in filters.select_channel(rows, min_views=0, viral_factor=1,
                                                   max_per_channel=2).videos] == [500, 400]
-    assert len(filters.apply_filter(rows + [video(6, 1, 'b')], min_views=0,
-                                    viral_factor=1, max_per_channel=1)) == 2
 
 
 def test_no_recent_and_unknown_metadata():
@@ -55,3 +53,26 @@ def test_fingerprints_strip_accents_and_use_smaller_set():
     assert filters.fingerprint('ĐÂY là lời nói') == filters.fingerprint('day la loi noi')
     assert filters.similarity({'a', 'b'}, {'a', 'b', 'c'}) == 1
     assert filters.similarity(set(), {'a'}) == 0
+
+
+def test_metrics_use_known_parts_and_channel_median():
+    rows = [video(1, 100), video(2, 200), video(3, 600)]
+    rows[2].page_followers = 300
+    rows[2].reactions, rows[2].shares = 30, 6
+    filters.select_channel(rows, min_views=0, viral_factor=1)
+    assert rows[2].interactions == 36
+    assert rows[2].ratio_follow == 2 and rows[2].ratio_median == 3
+    assert rows[2].engagement == 0.06 and rows[2].share_rate == 0.01
+    assert rows[0].interactions is None and rows[0].engagement is None
+    assert rows[0].share_rate is None and rows[0].ratio_follow is None
+
+
+def test_zero_and_missing_metrics():
+    zero = video(1, 0)
+    zero.page_followers, zero.comments, zero.shares = 0, 0, 0
+    unknown = video(2, None)
+    filters.select_channel([zero, unknown], min_views=0, viral_factor=1)
+    assert zero.interactions == 0
+    assert zero.ratio_median is None and zero.ratio_follow is None
+    assert zero.engagement is None and zero.share_rate is None
+    assert unknown.interactions is None and unknown.ratio_median is None

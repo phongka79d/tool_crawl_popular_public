@@ -29,7 +29,7 @@ def _channel_problems(text: str) -> list[str]:
 
 
 def saved_channels() -> list[str]:
-    path = config.CONFIG_DIR / "channels.txt"
+    path = config.CHANNELS_FILE
     if not path.exists():
         return []
     lines = (raw.strip() for raw in path.read_text(encoding="utf-8").splitlines())
@@ -37,7 +37,7 @@ def saved_channels() -> list[str]:
 
 
 def get_channels() -> dict:
-    path = config.CONFIG_DIR / "channels.txt"
+    path = config.CHANNELS_FILE
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     lines = (line.strip() for line in text.splitlines())
     count = sum(1 for line in lines if line and not line.startswith("#") and facebook.page_url_problem(line) is None)
@@ -50,9 +50,10 @@ def save_channels(text: str) -> dict:
         return fail("Chưa lưu. Sửa các dòng sau:\n\n" + "\n".join(f"- {problem}" for problem in problems), problems=problems)
     lines = [raw.strip() for raw in text.splitlines() if raw.strip()]
     try:
-        (config.CONFIG_DIR / "channels.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        config.CHANNELS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        config.CHANNELS_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
     except OSError as exc:
-        message = "Không thể lưu danh sách kênh. Kiểm tra quyền ghi thư mục config."
+        message = "Không thể lưu danh sách kênh. Kiểm tra quyền ghi thư mục data."
         logger.warning("%s", message, exc_info=exc)
         return fail(message)
     count = sum(1 for line in lines if not line.startswith("#"))

@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from backend.core.normalize import is_older_than, parse_count, to_iso, to_vn_datetime
+from backend.core.normalize import is_older_than, parse_count, to_vn_datetime
 
 UTC = timezone.utc
 DAY = 86_400
@@ -105,11 +105,6 @@ def test_to_vn_datetime_rolls_day_at_vn_midnight() -> None:
     # 17:30 UTC ngày 11/10 là 00:30 ngày 12/10 theo giờ Việt Nam.
     ts = int(datetime(2026, 10, 11, 17, 30, tzinfo=UTC).timestamp())
     assert to_vn_datetime(ts).date() == date(2026, 10, 12)
-
-
-def test_to_iso_formats_with_plus_07_offset() -> None:
-    ts = int(datetime(2026, 10, 11, 17, 30, tzinfo=UTC).timestamp())
-    assert to_iso(ts) == "2026-10-12T00:30:00+07:00"
 
 
 def test_is_older_than_boundary_is_exclusive() -> None:

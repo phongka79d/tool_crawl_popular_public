@@ -4,20 +4,19 @@ import copy
 import json
 import os
 import shutil
-import sys
 from pathlib import Path
 
-_SOURCE_DIR = Path(__file__).resolve().parents[1]
-ROOT = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[2]
-BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", _SOURCE_DIR))
-FRONTEND_DIR = BUNDLE_DIR / "frontend" if getattr(sys, "frozen", False) else ROOT / "frontend"
+ROOT = Path(__file__).resolve().parents[2]
+FRONTEND_DIR = ROOT / "frontend"
 CONFIG_DIR = ROOT / "config"
 DATA_DIR = ROOT / "data"
 OUTPUT_DIR = ROOT / "output"
 PROFILE_DIR = ROOT / "profile"
 DB_PATH = DATA_DIR / "cache.db"
 COOKIE_FILE = DATA_DIR / "fb_cookies.txt"
-SETTINGS_FILE = CONFIG_DIR / "settings.json"
+# Lựa chọn và danh sách kênh của người dùng nằm trong data/ (không đưa lên Git); mặc định ở DEFAULT_SETTINGS.
+SETTINGS_FILE = DATA_DIR / "settings.json"
+CHANNELS_FILE = DATA_DIR / "channels.txt"
 BROWSER_UA_FILE = DATA_DIR / "browser_ua.txt"
 BROWSER_LANG_FILE = DATA_DIR / "browser_lang.txt"
 DEFAULT_SETTINGS = {
@@ -67,8 +66,7 @@ def save_settings(settings: dict) -> None:
     SETTINGS_FILE.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def load_lines(rel_path: str) -> list[str]:
-    path = ROOT / rel_path
+def load_lines(path: Path) -> list[str]:
     if not path.exists():
         return []
     return [line for raw in path.read_text(encoding="utf-8").splitlines()

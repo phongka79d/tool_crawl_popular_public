@@ -198,8 +198,12 @@ def _track_channels(state, event):
                 channel["transcribed"] += event.step - previous
             if channel["passed"] is not None and channel["transcribed"] >= channel["passed"]:
                 channel["status"] = "Đã chép lời"
+    if event.stage == "scan" and event.passed is not None:
+        done, known = state.get("scan_transcribed", (0, 0))
+        state["scan_transcribed"] = (done, max(known, sum(row["passed"] or 0 for row in channels)))
     if event.stage == "transcribe" and event.steps:
-        state["scan_transcribed"] = (event.step, event.steps)
+        done, known = state.get("scan_transcribed", (0, 0))
+        state["scan_transcribed"] = (max(done, event.step), max(known, event.steps))
     if event.stage in ("export", "done"):
         for row in channels:
             if row["status"] != "Có lỗi":
@@ -267,9 +271,9 @@ def _lanes(state, stage):
     for name, title, completed, count, label in (("scan", "Quét Facebook", scanned, total, "kênh"),
                                                ("transcribe", "Chép lời", done, known, "video")):
         event = state["scan_lanes"].get(name)
-        if event and event.stage == "enhance":
-            completed, count, label = event.step, event.steps, "nhóm"
-        complete = finished or count > 0 and completed >= count
+        complete = finished or (count > 0 and completed >= count and
+                               (name == "scan" or scanned == total and event is not None
+                                and event.stage != "enhance"))
         lanes.append(dict(id=name, title=title, state="done" if complete else "current" if event else "pending",
             message=event.message if event and not complete else "Đã hoàn tất." if complete else "Đang chờ bắt đầu.",
             page_url=event.page_url if event else None,

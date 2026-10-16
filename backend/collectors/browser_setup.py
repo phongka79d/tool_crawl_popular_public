@@ -1,7 +1,6 @@
 """Chuẩn bị Chromium dùng chung cho cửa sổ ứng dụng và trình duyệt quét."""
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -15,10 +14,6 @@ def browsers_installed(executable: Path) -> bool:
 
 
 def ensure_chromium() -> Path:
-    if getattr(sys, "frozen", False):
-        # Đặt trước khi Playwright tính executable_path, không chỉ cho subprocess cài đặt.
-        # data/ được giữ khi nâng cấp (bộ cài thay toàn bộ app/), nên không phải tải lại ~150 MB.
-        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(config.DATA_DIR / "browsers")
     from playwright._impl._driver import compute_driver_executable, get_driver_env
     from playwright.sync_api import sync_playwright
 

@@ -16,6 +16,7 @@ def settings_environment(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "ROOT", tmp_path)
     monkeypatch.setattr(config, "CONFIG_DIR", directory)
     monkeypatch.setattr(config, "SETTINGS_FILE", directory / "settings.json")
+    monkeypatch.setattr(config, "CHANNELS_FILE", directory / "channels.txt")
     monkeypatch.setattr(config, "COOKIE_FILE", tmp_path / "fb_cookies.txt")
     from backend.core import keys
     monkeypatch.setattr(keys, 'delete_key', lambda: None)
@@ -30,15 +31,15 @@ def test_channels_save_preserves_comments_and_reload():
     result = channels.save_channels(text)
     expected = "# Kênh ngành dược\nhttps://www.facebook.com/pharmacy.page\nhttps://www.facebook.com/another.page\n"
     assert result["ok"] and result["count"] == 2
-    assert (config.CONFIG_DIR / "channels.txt").read_text(encoding="utf-8") == expected
-    assert config.load_lines("config/channels.txt") == [
+    assert config.CHANNELS_FILE.read_text(encoding="utf-8") == expected
+    assert config.load_lines(config.CHANNELS_FILE) == [
         "https://www.facebook.com/pharmacy.page", "https://www.facebook.com/another.page"]
     assert channels.get_channels() == {"ok": True, "text": expected, "count": 2, "problems": []}
-    assert channels.saved_channels() == config.load_lines("config/channels.txt")
+    assert channels.saved_channels() == config.load_lines(config.CHANNELS_FILE)
 
 
 def test_channels_reject_group_without_writing():
-    path = config.CONFIG_DIR / "channels.txt"
+    path = config.CHANNELS_FILE
     original = "# Giữ lại\nhttps://www.facebook.com/pharmacy.page\n"
     path.write_text(original, encoding="utf-8")
     result = channels.save_channels("https://www.facebook.com/groups/123456")
@@ -47,7 +48,7 @@ def test_channels_reject_group_without_writing():
 
 
 def test_saved_channels_skip_invalid_and_comments():
-    (config.CONFIG_DIR / "channels.txt").write_text(
+    config.CHANNELS_FILE.write_text(
         "# note\nhttps://www.facebook.com/groups/123\nhttps://www.facebook.com/page\n", encoding="utf-8")
     assert channels.saved_channels() == ["https://www.facebook.com/page"]
     assert channels.get_channels()["problems"]
@@ -57,13 +58,13 @@ def test_reset_defaults_channels_preserves_data(tmp_path):
     config.COOKIE_FILE.write_text("session", encoding="utf-8")
     output = tmp_path / "kept.xlsx"
     output.write_bytes(b"result")
-    (config.CONFIG_DIR / "channels.txt").write_text("page", encoding="utf-8")
+    config.CHANNELS_FILE.write_text("page", encoding="utf-8")
     settings = config.load_settings()
     settings["scan"]["days"] = 99
     config.save_settings(settings)
     assert app_state.reset_configuration()["ok"]
     assert config.load_settings() == config.DEFAULT_SETTINGS
-    assert (config.CONFIG_DIR / "channels.txt").read_text(encoding="utf-8") == ""
+    assert config.CHANNELS_FILE.read_text(encoding="utf-8") == ""
     assert config.COOKIE_FILE.read_text(encoding="utf-8") == "session"
     assert output.read_bytes() == b"result"
 
@@ -153,12 +154,6 @@ def test_error_message_redacts_expected_errors_and_hides_unexpected(monkeypatch)
     monkeypatch.setattr(common.applog, "redact", lambda text: text.replace("candidate-secret", "masked"))
     assert "candidate-secret" not in common.error_message(ServiceError("facebook", "candidate-secret"), ("candidate-secret",))
     assert "private detail" not in common.error_message(RuntimeError("private detail"))
-
-
-@pytest.mark.parametrize("url,valid", [("https://example.com/v1", True), ("http://localhost:123/v1", True),
-                                      ("file:///tmp", False), ("https://", False), ("http://[bad", False)])
-def test_endpoint_validation(url, valid):
-    assert common.is_http_url(url) is valid
 
 
 def test_login_admission_prevents_duplicate_and_scan_overlap(monkeypatch):

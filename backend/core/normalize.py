@@ -79,11 +79,6 @@ def to_vn_datetime(ts: int) -> datetime:
     return datetime.fromtimestamp(ts, tz=VN_TZ)
 
 
-def to_iso(ts: int) -> str:
-    """Unix seconds -> chuỗi ISO 8601 theo giờ Việt Nam, ví dụ '2026-10-12T00:30:00+07:00'."""
-    return to_vn_datetime(ts).isoformat(timespec="seconds")
-
-
 def is_older_than(ts: int, days: int, now: int | None = None) -> bool:
     """True nếu bài đăng lúc `ts` đã cũ hơn `days` ngày (đúng bằng ngưỡng thì chưa cũ hơn).
 

@@ -71,7 +71,8 @@ def reset_configuration() -> dict:
         from backend.core import keys
         keys.delete_key()
         config.save_settings(config.DEFAULT_SETTINGS)
-        (config.CONFIG_DIR / "channels.txt").write_text("", encoding="utf-8")
+        config.CHANNELS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        config.CHANNELS_FILE.write_text("", encoding="utf-8")
     return {"ok": True, "message": "Đã khôi phục cấu hình mặc định và xóa danh sách kênh."}
 
 

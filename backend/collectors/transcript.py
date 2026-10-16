@@ -1,5 +1,6 @@
 """Local Vietnamese transcription; PyAV decodes downloaded audio without ffmpeg."""
 from __future__ import annotations
+import os
 import tempfile
 from pathlib import Path
 import threading
@@ -9,7 +10,6 @@ from backend.core.models import Video
 
 OK = 'ok'
 NO_SPEECH = 'no_speech'
-FAILED = 'failed'
 
 
 class Transcriber:
@@ -22,8 +22,10 @@ class Transcriber:
         if self._model is None:
             from faster_whisper import WhisperModel
             self._model = WhisperModel('small', device='cpu', compute_type='int8',
+                                       cpu_threads=max(1, (os.cpu_count() or 1) // 2), num_workers=1,
                                        download_root=str(config.DATA_DIR / 'models'))
-        segments, _ = self._model.transcribe(str(path), language='vi', vad_filter=True)
+        segments, _ = self._model.transcribe(str(path), language='vi', vad_filter=True,
+                                             beam_size=1, condition_on_previous_text=False)
         return ' '.join(segment.text.strip() for segment in segments).strip()
 
 

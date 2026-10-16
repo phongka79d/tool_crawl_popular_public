@@ -1,8 +1,8 @@
 """Điểm vào cửa sổ Windows của Video Công Thức."""
 from __future__ import annotations
 
-import os
 import socket
+import shutil
 import sys
 import threading
 from pathlib import Path
@@ -13,16 +13,10 @@ if __package__ in (None, ""):
 from backend.core import applog, config
 
 
-_REQUIRED_BUNDLE_FILES = ("base_library.zip", "frontend/index.html")
-_ARCHIVE_TEMP_MARKERS = ("\\temp1_", "\\rar$", "\\7zo")
 # pywebview mặc định dùng cổng 42001 cho mọi app; app pywebview khác đang giữ cổng đó thì cửa sổ
 # này sẽ hiện nhầm giao diện của app kia. Dùng cổng riêng, cố định để giữ localStorage giữa các lần mở;
 # khác cổng 47231 của bản đầy đủ Video Công Thức để chạy song song hai bản không bị trùng.
 PREFERRED_HTTP_PORT = 47241
-
-
-class BundleIncomplete(RuntimeError):
-    """Bộ cài thiếu tệp hoặc chưa được giải nén."""
 
 
 class WebViewUnavailable(RuntimeError):
@@ -55,49 +49,10 @@ def http_port(preferred: int = PREFERRED_HTTP_PORT) -> int:
     return port
 
 
-def bundle_problems(bundle_dir: Path, exe_path: Path) -> list[str]:
-    problems: list[str] = []
-    if any(marker in str(exe_path).replace("/", "\\").lower() for marker in _ARCHIVE_TEMP_MARKERS):
-        problems.append("đang chạy trực tiếp bên trong file ZIP")
-    try:
-        os.listdir(bundle_dir)
-    except OSError as exc:
-        return problems + [f"không đọc được thư mục {bundle_dir} ({exc.strerror or exc})"]
-    for name in _REQUIRED_BUNDLE_FILES:
-        if not (bundle_dir / name).is_file():
-            display_name = name.replace("/", "\\")
-            problems.append(f"thiếu app\\{display_name}")
-    return problems
-
-
-def _check_bundle() -> None:
-    if not getattr(sys, "frozen", False):
-        return
-    bundle_dir, exe_path = Path(sys._MEIPASS), Path(sys.executable)
-    applog.log.info("Bản exe: %s · thư mục chương trình: %s", exe_path, bundle_dir)
-    problems = bundle_problems(bundle_dir, exe_path)
-    if problems:
-        applog.log.error("Bộ cài chưa đầy đủ: %s", "; ".join(problems))
-        raise BundleIncomplete("; ".join(problems))
-
-
 def _show_fatal_error(exc: BaseException) -> None:
     import ctypes
 
-    if isinstance(exc, BundleIncomplete):
-        message = (
-            "Video Công Thức chưa được giải nén đầy đủ nên không chạy được.\n\n"
-            f"Lý do: {exc}.\n\n"
-            "Cách sửa:\n"
-            "1. Đóng cửa sổ này. Bấm chuột phải vào file VideoCongThuc.zip → Extract All (Giải nén tất cả).\n"
-            "2. Giải nén vào thư mục ngắn, ví dụ C:\\VideoCongThuc hoặc D:\\VideoCongThuc.\n"
-            "3. Mở thư mục vừa giải nén và chạy VideoCongThuc.exe. Không chạy exe khi đang xem bên trong file ZIP, "
-            "không chép riêng file exe ra chỗ khác (dùng Send to → Desktop (create shortcut)).\n"
-            "4. Nếu vẫn lỗi, phần mềm diệt virus có thể đã xóa tệp: cho phép thư mục này rồi giải nén lại.\n\n"
-            "Tool đã có sẵn mọi thư viện cần thiết, không cần cài thêm Python.\n"
-            "Chi tiết trong data\\app.log."
-        )
-    elif isinstance(exc, WebViewUnavailable):
+    if isinstance(exc, WebViewUnavailable):
         message = (
             "Không khởi động được Microsoft Edge WebView2.\n\n"
             "Hãy cài Microsoft Edge WebView2 Runtime rồi mở lại Video Công Thức:\n"
@@ -112,12 +67,23 @@ def _show_fatal_error(exc: BaseException) -> None:
     ctypes.windll.user32.MessageBoxW(None, message, "Video Công Thức", 0x10)
 
 
+def _drop_stale_ui_cache(storage: Path) -> None:
+    """Xoá cache HTTP của WebView2 để giao diện luôn là bản mới nhất sau khi cập nhật.
+
+    Máy chủ của pywebview không gửi Cache-Control (bottle.static_file bỏ header đặt trước),
+    nên WebView2 tự giữ JS/CSS cũ. Chỉ xoá cache; localStorage và phiên đăng nhập giữ nguyên.
+    """
+    for name in ("Cache", "Code Cache"):
+        shutil.rmtree(storage / "EBWebView" / "Default" / name, ignore_errors=True)
+
+
 def _serve() -> None:
     import webview
 
     from backend.api import Bridge, app_state, scan
 
     threading.Thread(target=app_state.prepare_browser, daemon=True, name="prepare-browser").start()
+    _drop_stale_ui_cache(config.DATA_DIR / "webview")
     bridge = Bridge()
     window = webview.create_window(
         "Video Công Thức",
@@ -162,6 +128,7 @@ def _serve() -> None:
             private_mode=False,
             storage_path=str(config.DATA_DIR / "webview"),
             http_port=http_port(),
+            icon=str(config.FRONTEND_DIR / "img" / "logo.ico"),
         )
     except Exception as exc:
         raise WebViewUnavailable(str(exc)) from exc
@@ -173,7 +140,6 @@ def main() -> None:
     try:
         applog.setup()
         config.ensure_dirs()
-        _check_bundle()
         _serve()
     except Exception as exc:
         applog.log.exception("Không khởi động được ứng dụng")

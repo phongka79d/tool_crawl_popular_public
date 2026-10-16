@@ -2,20 +2,11 @@
 from __future__ import annotations
 
 import logging
-from urllib.parse import urlsplit
 
 from backend.core import applog
 from backend.core.errors import ServiceError
 
 logger = logging.getLogger("app.api")
-
-
-def format_number(value: float) -> str:
-    return f"{value:.4f}".rstrip("0").rstrip(".").replace(".", ",")
-
-
-def int_text(value: float | None) -> str:
-    return "—" if value is None else f"{round(value):,}".replace(",", ".")
 
 
 def redact(text: str, secrets: tuple[str, ...] = ()) -> str:
@@ -32,14 +23,6 @@ def error_message(exc: Exception, secrets: tuple[str, ...] = ()) -> str:
     logger.error("Lỗi không mong đợi: %s", type(exc).__name__, exc_info=exc)
     return ("Không thể hoàn tất thao tác. Kiểm tra kết nối, quyền truy cập và cấu hình rồi thử lại. "
             "Chi tiết trong Nhật ký.")
-
-
-def is_http_url(value: str) -> bool:
-    try:
-        parts = urlsplit(value.strip())
-        return parts.scheme in ("http", "https") and bool(parts.netloc)
-    except ValueError:
-        return False
 
 
 def fail(message: str, **extra) -> dict:

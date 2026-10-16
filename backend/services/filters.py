@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 import statistics
 import unicodedata
-from collections import defaultdict
 from dataclasses import dataclass
 from backend.core.models import Video
 from backend.core.normalize import is_older_than
@@ -23,22 +22,24 @@ def select_channel(videos: list[Video], days: int = 14, min_views: int = 50000,
     recent = [v for v in videos if v.format in {'video', 'reel'} and not v.is_live
               and (v.posted_at is None or not is_older_than(v.posted_at, days, now))]
     counts = [v.views for v in recent if v.views is not None]
+    for video in videos:
+        parts = [value for value in (video.reactions, video.comments, video.shares) if value is not None]
+        video.interactions = sum(parts) if parts else None
+        video.ratio_follow = (video.views / video.page_followers
+                              if video.views is not None and video.page_followers else None)
+        video.engagement = (video.interactions / video.views
+                            if video.interactions is not None and video.views else None)
+        video.share_rate = video.shares / video.views if video.shares is not None and video.views else None
+        video.ratio_median = None
     if not counts:
         return ViralSelection([], len(recent), None, None)
     median = statistics.median(counts)
     threshold = max(viral_factor * median, min_views)
+    for video in recent:
+        video.ratio_median = video.views / median if video.views is not None and median else None
     selected = sorted((v for v in recent if v.views is not None and v.views >= threshold),
                       key=lambda v: -(v.views or 0))[:max_per_channel]
     return ViralSelection(selected, len(recent), median, threshold)
-
-
-def apply_filter(videos: list[Video], days: int = 14, min_views: int = 50000,
-                 viral_factor: float = 3, max_per_channel: int = 10) -> list[Video]:
-    pages = defaultdict(list)
-    for video in videos:
-        pages[video.page_url].append(video)
-    return [video for rows in pages.values() for video in
-            select_channel(rows, days, min_views, viral_factor, max_per_channel).videos]
 
 
 def fingerprint(text: str) -> set[str]:

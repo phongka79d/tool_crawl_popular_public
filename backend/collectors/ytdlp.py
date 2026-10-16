@@ -9,11 +9,13 @@ import logging
 import os
 import re
 import threading
+import shutil
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
 import yt_dlp
-from yt_dlp.utils import YoutubeDLError, download_range_func
+from yt_dlp.utils import YoutubeDLError
 
 from backend.core import config
 from backend.collectors.cookies import is_netscape_file
@@ -116,7 +118,13 @@ def _with_account_fallback(run: Callable[[dict], object]) -> object:
         account = _cookie_opts()
         if not account:
             raise
-        return run(account)
+        # YoutubeDL writes its cookie jar on exit. Give it a private snapshot so
+        # a fallback cannot overwrite the scanner's newer, atomically exported jar.
+        with tempfile.TemporaryDirectory(prefix='download_cookie_') as temporary:
+            snapshot = Path(temporary) / 'cookies.txt'
+            shutil.copyfile(account['cookiefile'], snapshot)
+            return run({**account, 'cookiefile': str(snapshot),
+                        'sleep_interval_requests': 1, 'sleep_interval': 2, 'max_sleep_interval': 6})
 
 
 def fetch_metadata(url: str) -> dict:
@@ -126,6 +134,8 @@ def fetch_metadata(url: str) -> dict:
     Khóa nào yt-dlp không có thì giá trị là None.
     """
     def run(extra: dict) -> dict:
+        # Metadata can run for dozens of videos back to back; a 1 s request gap keeps the
+        # anonymous IP from looking like a burst. Downloads are naturally paced by transcription.
         opts = {**_QUIET_OPTS, "skip_download": True, "noplaylist": True,
                 "sleep_interval_requests": 1, **extra}
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -160,14 +170,13 @@ def _find_download(out_dir: Path, stem: str) -> Path | None:
     return candidates[0] if candidates else None
 
 
-def download_audio(url: str, out_dir: Path, first_seconds: int | None = None,
-                   ffmpeg: str | None = None) -> Path | None:
+def download_audio(url: str, out_dir: Path) -> Path | None:
     """Tải audio (bestaudio) vào out_dir.
 
     Coi là thành công khi có file đã tải xong, kể cả khi yt-dlp báo lỗi
     (ví dụ phụ đề hỏng; PLAN §11.5). Không có file thì trả None.
-    `first_seconds` (cần `ffmpeg`): chỉ tải chừng ấy giây đầu, cho video dài như livestream
-    (3 giờ là ~95 MB audio, 10 phút ~5 MB). Tải đoạn đầu không được thì tải cả audio.
+    Thử không cookie trước: trang Facebook khi đã đăng nhập có định dạng khác mà yt-dlp
+    báo "Cannot parse data", còn reel công khai tải được không cần tài khoản.
     """
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -181,9 +190,8 @@ def download_audio(url: str, out_dir: Path, first_seconds: int | None = None,
             "format": "bestaudio/best",
             "outtmpl": os.path.join(str(out), f"{stem}.%(ext)s"),
             "noplaylist": True,
-            # Nghỉ ngẫu nhiên trước mỗi lượt tải như người xem lần lượt từng video.
-            "sleep_interval": 2,
-            "max_sleep_interval": 6,
+            # Anonymous public downloads are serialized; no account session to pace.
+            # Account fallback retains the original request/download delays.
             **extra,
         }
         try:
@@ -199,17 +207,9 @@ def download_audio(url: str, out_dir: Path, first_seconds: int | None = None,
             raise YoutubeDLError("không có file audio")
         return found
 
-    attempts: list[dict] = [{}]
-    if first_seconds and ffmpeg:
-        attempts.insert(0, {"download_ranges": download_range_func(None, [(0, first_seconds)]),
-                            "ffmpeg_location": ffmpeg})
     with _DOWNLOAD_LOCK:
-        for number, section in enumerate(attempts, 1):
-            try:
-                return run({**section, **_cookie_opts()})
-            except Exception as exc:  # noqa: BLE001 - mọi lỗi tải đều quy về "không có audio"
-                if number < len(attempts):
-                    logger.warning("Không tải được %s giây đầu (%s): %s; tải cả audio", first_seconds, url, exc)
-                else:
-                    logger.warning("Không tải được audio (%s): %s", url, exc)
+        try:
+            return _with_account_fallback(run)
+        except Exception as exc:  # noqa: BLE001 - mọi lỗi tải đều quy về "không có audio"
+            logger.warning("Không tải được audio (%s): %s", url, exc)
     return None

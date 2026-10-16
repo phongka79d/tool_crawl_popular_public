@@ -25,6 +25,11 @@ class Video:
     reactions: int | None = None
     comments: int | None = None
     shares: int | None = None
+    interactions: int | None = None
+    ratio_follow: float | None = None
+    ratio_median: float | None = None
+    engagement: float | None = None
+    share_rate: float | None = None
     caption: str = ""
     transcript: str = ""
     transcript_clean: str = ""

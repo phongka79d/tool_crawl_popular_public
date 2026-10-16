@@ -1,5 +1,5 @@
 import { el } from "../../components/dom.js";
-import { button, card, statusPill, textarea, alert, expander, select, textInput } from "../../components/index.js";
+import { button, card, badge, textarea, alert, expander, select, textInput } from "../../components/index.js";
 /** Settings retain unsaved form values while shell state refreshes. */
 export function mount(target, ctx) {
   if (!document.getElementById("settings-styles")) {
@@ -34,7 +34,7 @@ export function mount(target, ctx) {
       return result;
     });
   } });
-  controls.append(expander({ title: "Đặt lại cấu hình", body: el("div", "stack", el("p", "hint", "Khôi phục settings.json mặc định, xoá key AI và danh sách kênh. Không xóa Excel, cache hay phiên Facebook."), el("div", "row", resetButton), resetErrors) }));
+  controls.append(expander({ title: "Đặt lại cấu hình", body: el("div", "stack", el("p", "hint", "Khôi phục lựa chọn quét mặc định, xoá key AI và danh sách kênh. Không xóa Excel, cache hay phiên Facebook."), el("div", "row", resetButton), resetErrors) }));
   root.append(busyHint, controls);
   target.replaceChildren(root);
   function app() {
@@ -111,7 +111,7 @@ export function mount(target, ctx) {
   function renderFacebook() {
     if (disposed)
       return;
-    const errors = el("div"), body = el("div", "stack", statusPill({ label: fbReady ? "Đã đăng nhập" : "Chưa đăng nhập", state: fbReady ? "success" : "warning" }), el("p", "hint", "Dùng tài khoản Facebook phụ để app quét được video. Cửa sổ trình duyệt sẽ mở để bạn tự đăng nhập; phiên được lưu cho lần quét sau."), el("p", "hint", "Không chia sẻ thư mục profile/ và file data/fb_cookies.txt: chúng chứa phiên đăng nhập Facebook của bạn."));
+    const errors = el("div"), body = el("div", "stack", badge({ label: fbReady ? "Đã đăng nhập" : "Chưa đăng nhập", state: fbReady ? "success" : "warning" }), el("p", "hint", "Dùng tài khoản Facebook phụ để app quét được video. Cửa sổ trình duyệt sẽ mở để bạn tự đăng nhập; phiên được lưu cho lần quét sau."), el("p", "hint", "Không chia sẻ thư mục profile/ và file data/fb_cookies.txt: chúng chứa phiên đăng nhập Facebook của bạn."));
     const login = button({ label: fbReady ? "Đăng nhập lại" : "Đăng nhập Facebook", variant: fbReady ? "secondary" : "primary", onClick: () => run(login, errors, async () => {
       const result = await ctx.call("start_login");
       if (result.ok && !disposed) {
@@ -214,7 +214,7 @@ export function mount(target, ctx) {
     }) });
     const body = el("div", "stack",
       el("p", "hint", "Không bắt buộc. Có key, app nhờ AI sửa từ nghe nhầm và thêm dấu câu, giữ nguyên lời người nói. Lời thoại được gửi tới nhà cung cấp; nhà cung cấp có thể tính phí theo lượt dùng."),
-      statusPill({ label: saved.enabled ? `Đã bật · ${saved.model}` : "Chưa bật — không bắt buộc", state: saved.enabled ? "success" : "neutral" }),
+      badge({ label: saved.enabled ? `Đã bật · ${saved.model}` : "Chưa bật — không bắt buộc", state: saved.enabled ? "success" : "neutral" }),
       provider, endpoint, key, el("div", "row", connect, remove), modelsArea, errors);
     if (!saved.storage_secure) body.prepend(alert({ variant: "warning", message: "Windows Credential Manager chưa khả dụng hoặc không an toàn. App từ chối lưu key; vẫn chép lời trên máy bình thường." }));
     llmArea.replaceChildren(card({ title: "Cải thiện lời thoại bằng AI (không bắt buộc)", body }));

@@ -34,50 +34,6 @@ BRIDGE_CALLS = [
 ]
 
 
-def _complete_bundle(path: Path) -> Path:
-    for name in ("base_library.zip", "frontend/index.html"):
-        target = path / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(b"")
-    return path
-
-
-def test_complete_bundle_has_no_problems(tmp_path):
-    bundle = _complete_bundle(tmp_path)
-    assert main.bundle_problems(bundle, Path("C:/VideoCongThuc/VideoCongThuc.exe")) == []
-
-
-def test_partially_extracted_bundle_names_missing_files(tmp_path):
-    bundle = _complete_bundle(tmp_path)
-    (bundle / "frontend/index.html").unlink()
-    assert main.bundle_problems(bundle, Path("C:/VideoCongThuc/VideoCongThuc.exe")) == [
-        "thiếu app\\frontend\\index.html"
-    ]
-
-
-def test_bundle_requires_files_not_directories(tmp_path):
-    bundle = _complete_bundle(tmp_path)
-    (bundle / "base_library.zip").unlink()
-    (bundle / "base_library.zip").mkdir()
-    assert main.bundle_problems(bundle, Path("C:/VideoCongThuc/VideoCongThuc.exe")) == ["thiếu app\\base_library.zip"]
-
-
-@pytest.mark.parametrize("exe", [
-    r"C:\Users\A\AppData\Local\Temp\Temp1_VideoCongThuc.zip\VideoCongThuc\VideoCongThuc.exe",
-    r"C:\Users\A\AppData\Local\Temp\Rar$EXa1234.5678\VideoCongThuc\VideoCongThuc.exe",
-    r"C:\Users\A\AppData\Local\Temp\7zO1234\VideoCongThuc\VideoCongThuc.exe",
-])
-def test_running_from_inside_zip_is_reported(tmp_path, exe):
-    assert main.bundle_problems(_complete_bundle(tmp_path), Path(exe)) == [
-        "đang chạy trực tiếp bên trong file ZIP"
-    ]
-
-
-def test_unreadable_bundle_dir_is_reported(tmp_path):
-    problems = main.bundle_problems(tmp_path / "missing", Path("C:/VideoCongThuc/VideoCongThuc.exe"))
-    assert len(problems) == 1 and problems[0].startswith("không đọc được thư mục")
-
-
 def test_bridge_exposes_exact_contract_methods():
     expected = {name for name, _, _ in BRIDGE_CALLS} | {
         "pick_cookie_file_and_import", "save_result_as", "open_url"

@@ -1,6 +1,5 @@
 import { call, isMock } from "./api.js";
 import { store } from "./store.js";
-import { icon } from "./icons.js";
 import { el } from "./components/dom.js";
 import { button } from "./components/button.js";
 import { stepper } from "./components/stepper.js";
@@ -19,7 +18,8 @@ try {
     current = saved;
 } catch {}
 let appState = null, activePage = null, disposePage = null, pageVersion = 0, mountKey = "", lastShell = "", refreshing = null;
-const root = el("main", "app-shell"), header = el("header", "app-header chrome", el("div", "app-icon", icon("film", 26)), el("h1", "", "Video Công Thức"), el("div", "spacer"), button({ label: "Nhật ký", icon: "log", onClick: openLogs })), banners = el("div", "shell-banners"), journey = el("div"), next = el("div"), content = el("section", "page-content");
+const logo = Object.assign(document.createElement("img"), { className: "app-icon", src: "img/logo.svg", alt: "", width: 44, height: 44 });
+const root = el("main", "app-shell"), header = el("header", "app-header chrome", logo, el("h1", "", "Video Công Thức"), el("div", "spacer"), button({ label: "Nhật ký", icon: "log", onClick: openLogs })), banners = el("div", "shell-banners"), journey = el("div"), next = el("div"), content = el("section", "page-content");
 content.id = "page-content";
 content.setAttribute("aria-label", pages[current]);
 const nav = tabs({ items: Object.entries(pages).map(([id, label]) => ({ id, label })), value: current, onChange: navigate });

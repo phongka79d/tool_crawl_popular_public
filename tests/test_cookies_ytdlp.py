@@ -545,6 +545,11 @@ def test_fetch_metadata_tries_anonymous_before_account(monkeypatch, tmp_path, pu
 
         def extract_info(self, url, download=False):
             attempts.append(self.opts)
+            if "cookiefile" in self.opts:
+                snapshot = Path(self.opts["cookiefile"])
+                assert snapshot != cookie_path
+                assert snapshot.read_bytes() == cookie_path.read_bytes()
+                snapshot.write_text('updated private jar', encoding='utf-8')
             if "cookiefile" not in self.opts and not public:
                 raise ytdlp.YoutubeDLError("login required")
             return {"view_count": 5}
@@ -557,7 +562,10 @@ def test_fetch_metadata_tries_anonymous_before_account(monkeypatch, tmp_path, pu
         assert len(attempts) == 1  # video công khai: tài khoản không bị dùng
     else:
         assert len(attempts) == 2
-        assert attempts[1]["cookiefile"] == str(cookie_path)
+        assert attempts[1]["cookiefile"] != str(cookie_path)
+        assert not Path(attempts[1]["cookiefile"]).exists()
+        assert cookies.read_netscape(cookie_path)
+        assert attempts[1]["sleep_interval_requests"] == 1
         assert attempts[1]["http_headers"] == {"User-Agent": "Mozilla/5.0 Edg/141"}
 
 
@@ -705,6 +713,7 @@ def test_download_audio_returns_file_on_success(monkeypatch, tmp_path):
     assert seen["urls"] == ["https://m.facebook.com/watch/?v=9"]
     assert seen["opts"]["format"] == "bestaudio/best"
     assert seen["opts"]["noplaylist"] is True
+    assert "sleep_interval" not in seen["opts"]
 
 
 def test_download_audio_counts_existing_file_even_if_ytdlp_raises(monkeypatch, tmp_path):
@@ -732,22 +741,41 @@ def test_download_audio_ignores_partial_or_empty_files(monkeypatch, tmp_path, ex
     assert ytdlp.download_audio("https://www.facebook.com/reel/9", tmp_path) is None
 
 
-def test_download_audio_first_seconds_falls_back_to_full_audio(monkeypatch, tmp_path):
-    monkeypatch.setattr(ytdlp, "_cookie_opts", lambda: {})
+def test_download_audio_tries_without_account_cookies_first(monkeypatch, tmp_path):
+    """Cookie đã đăng nhập làm yt-dlp lỗi "Cannot parse data" với reel công khai."""
+    monkeypatch.setattr(ytdlp, "_cookie_opts", lambda: {"cookiefile": "fb_cookies.txt"})
     attempts = []
 
-    def ranged_fails(opts, urls):
-        attempts.append("ranged" if "download_ranges" in opts else "full")
-        if "download_ranges" in opts:
-            raise DownloadError("ffmpeg không cắt được đoạn đầu")
+    def logged_in_page_breaks(opts, urls):
+        attempts.append("cookie" if "cookiefile" in opts else "anonymous")
+        if "cookiefile" in opts:
+            raise DownloadError("Cannot parse data")
         return _write_audio(opts)
 
-    _install_fake_ydl(monkeypatch, on_download=ranged_fails)
+    _install_fake_ydl(monkeypatch, on_download=logged_in_page_breaks)
 
-    out = ytdlp.download_audio("https://www.facebook.com/p/videos/9", tmp_path, first_seconds=600, ffmpeg="ffmpeg")
+    assert ytdlp.download_audio("https://www.facebook.com/reel/9", tmp_path) is not None
+    assert attempts == ["anonymous"]
 
-    assert out is not None and out.exists()
-    assert attempts == ["ranged", "full"]
+
+def test_download_audio_uses_account_cookies_when_anonymous_fails(monkeypatch, tmp_path):
+    cookie_path = tmp_path / 'cookies.txt'
+    cookie_path.write_text('original jar', encoding='utf-8')
+    monkeypatch.setattr(ytdlp, "_cookie_opts", lambda: {"cookiefile": str(cookie_path)})
+    attempts = []
+
+    def needs_login(opts, urls):
+        attempts.append("cookie" if "cookiefile" in opts else "anonymous")
+        if "cookiefile" not in opts:
+            raise DownloadError("login required")
+        assert Path(opts["cookiefile"]).read_text(encoding='utf-8') == 'original jar'
+        assert opts["sleep_interval"] == 2 and opts["max_sleep_interval"] == 6
+        return _write_audio(opts)
+
+    _install_fake_ydl(monkeypatch, on_download=needs_login)
+
+    assert ytdlp.download_audio("https://www.facebook.com/reel/9", tmp_path) is not None
+    assert attempts == ["anonymous", "cookie"]
 
 
 def test_collector_later_live_evidence_removes_default_record():

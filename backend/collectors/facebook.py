@@ -682,7 +682,7 @@ class FacebookScanner:
         stop_event: threading.Event | None = None,
         on_progress: Callable[..., None] | None = None,
     ) -> list[dict]:
-        """Quét Reels/Video hoặc feed Bài đăng; trả dict từ graphql.flatten đã bỏ trùng.
+        """Quét tab Reels/Video; trả dict từ graphql.flatten đã bỏ trùng.
 
         Chỉ giữ bài có ngày đăng, đúng định dạng và không cũ hơn `days` ngày.
         Lỗi một tab được ghi trong `scan_errors` rồi quét tab tiếp. Giới hạn Facebook
@@ -711,7 +711,6 @@ class FacebookScanner:
                 if collector.full() or _stopped(stop_event):
                     break
                 label = _TAB_LABELS.get(fmt, fmt)
-                noun = "bài đăng" if fmt == "post" else "video"
                 url = tab_url(page_url, tab)
                 logger.info("Quét tab %s của %s", tab, page_url)
                 report(f"Tab {label}: đang mở…")
@@ -733,12 +732,12 @@ class FacebookScanner:
                 found = collector.count() - found_before
                 excluded = collector.excluded_summary(fmt)
                 note = f" · {excluded}" if excluded else ""
-                logger.info("Tab %s của %s: %d %s, dừng vì %s%s", tab, page_url, found, noun, reason, note)
+                logger.info("Tab %s của %s: %d video, dừng vì %s%s", tab, page_url, found, reason, note)
                 if found_before:
-                    report(f"Tab {label} xong: thêm {found} {noun} mới (không tính {noun} đã thấy ở tab trước), "
+                    report(f"Tab {label} xong: thêm {found} video mới (không tính video đã thấy ở tab trước), "
                            f"dừng vì {reason}{note}")
                 else:
-                    report(f"Tab {label} xong: {found} {noun}, dừng vì {reason}{note}")
+                    report(f"Tab {label} xong: {found} video, dừng vì {reason}{note}")
         finally:
             page.remove_listener("requestfinished", on_finished)
             self._export_cookies()

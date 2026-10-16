@@ -1,4 +1,5 @@
 import sys
+import os
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -39,8 +40,11 @@ def test_lazy_single_model_for_run_forced_vietnamese_and_cleanup(environment):
         assert status == 'ok' and len(text) >= 30
     assert len([call for call in calls if call[0] == 'model']) == 1
     assert calls[0][1] == ('small',)
-    assert calls[0][2] == {'device': 'cpu', 'compute_type': 'int8', 'download_root': str(config.DATA_DIR / 'models')}
-    assert all(call[2] == {'language': 'vi', 'vad_filter': True} for call in calls if call[0] == 'transcribe')
+    assert calls[0][2] == {'device': 'cpu', 'compute_type': 'int8',
+        'cpu_threads': max(1, (os.cpu_count() or 1) // 2), 'num_workers': 1,
+        'download_root': str(config.DATA_DIR / 'models')}
+    assert all(call[2] == {'language': 'vi', 'vad_filter': True, 'beam_size': 1,
+                          'condition_on_previous_text': False} for call in calls if call[0] == 'transcribe')
     assert all(not path.exists() and not path.parent.exists() for path in paths)
 
 

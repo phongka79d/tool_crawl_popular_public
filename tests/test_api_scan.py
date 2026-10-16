@@ -214,3 +214,24 @@ def test_export_completes_channel_without_counting_reused_audio(monkeypatch):
     assert result["channels"][0]["transcribed"] == 1
     assert result["channels"][0]["status"] == "Hoàn tất"
     assert [lane["state"] for lane in result["lanes"]] == ["done", "done"]
+
+
+def test_overlap_lane_not_finished_until_scanner_discovers_all_candidates(monkeypatch):
+    _enqueue(monkeypatch, [
+        _event(found=5, passed=1),
+        _event(stage="transcribe", step=1, steps=1),
+        _event(page_url="second", message="Đang quét kênh B"),
+    ], scan_channels=[_channel("page"), _channel("second")])
+    result = scan.get_scan_state()
+    assert result["lanes"][1]["state"] == "current"
+    assert result["channels"][0]["transcribed"] == 1
+    _enqueue(monkeypatch, [_event(page_url="second", found=5, passed=2)])
+    result = scan.get_scan_state()
+    assert result["lanes"][1]["label"] == "1/3 video"
+    _enqueue(monkeypatch, [
+        _event(stage="transcribe", page_url="second", step=3, steps=3),
+        _event(stage="enhance", page_url="second", step=3, steps=3),
+    ])
+    result = scan.get_scan_state()
+    assert result["lanes"][1]["state"] == "current"
+    assert result["lanes"][1]["label"] == "3/3 video"

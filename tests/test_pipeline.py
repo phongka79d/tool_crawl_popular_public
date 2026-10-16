@@ -260,7 +260,7 @@ def test_enhancement_batches_and_cancel_between_batches(harness, monkeypatch, ca
     result = pipeline.export_excel.read_summary(harness.run())
     assert sizes == expected and result['total'] == 9
     events = [event for event in harness.events if event.stage == 'enhance']
-    assert all(event.steps == 2 for event in events)
+    assert all(event.steps == 9 for event in events)
 
 
 def test_llm_failure_redacts_progress_and_excel(harness, monkeypatch):
@@ -272,3 +272,161 @@ def test_llm_failure_redacts_progress_and_excel(harness, monkeypatch):
     assert 'pipeline-test-credential' not in str(result)
     assert 'pipeline-test-credential' not in str(harness.events)
     assert '[đã che]' in result['errors'][0]
+
+
+def test_export_receives_structured_scan_context(harness, monkeypatch):
+    original = pipeline.export_excel.export
+    captured = {}
+    def export(videos, scan_lines, notes, **kwargs):
+        captured.update(kwargs)
+        captured['videos'] = videos
+        return original(videos, scan_lines, notes, **kwargs)
+    monkeypatch.setattr(pipeline.export_excel, 'export', export)
+    harness.rows[0].update(reactions=50, comments=0, shares=10)
+    assert harness.run().exists()
+    stats = captured['channel_stats']
+    assert stats == [dict(url=PAGE, name='Example', followers=0, scanned=1, recent=1,
+                          median=100000, threshold=100000, selected=1, highest_views=100000)]
+    context = captured['run_log']
+    assert context['started_at'] <= context['finished_at']
+    assert context['params']['viral_factor'] == 1 and context['params']['days'] == 14
+    assert context['channel_count'] == 1 and context['llm'] is None
+    video = captured['videos'][0]
+    assert video.interactions == 60 and video.ratio_median == 1
+    assert video.ratio_follow is None and video.engagement == 0.0006 and video.share_rate == 0.0001
+
+
+def test_reused_rows_keep_current_scan_metrics(harness):
+    from openpyxl import load_workbook
+    config.ensure_dirs()
+    db.init_db()
+    db.save_taken(Video('1', 'https://example/1', PAGE, page_name='Former name', views=20,
+                        transcript=TEXT, transcript_clean='Bản đã sửa'), 'taken', '2026-10-01')
+    path = harness.run()
+    workbook = load_workbook(path)
+    try:
+        sheet = workbook['Chi tiết video']
+        assert sheet['B3'].value == 'Example' and sheet['H3'].value == '100 nghìn'
+        assert sheet['N3'].value == 1
+        assert sheet['S3'].value == 'Bản đã sửa'
+        assert sheet['X3'].value == 'Lời thoại đã được AI sửa'
+    finally:
+        workbook.close()
+
+
+@pytest.mark.parametrize('enhance', [False, True])
+def test_channel_work_overlaps_next_scan_and_dedupe_is_global(harness, monkeypatch, enhance):
+    other = 'https://www.facebook.com/Other'
+    monkeypatch.setattr(config, 'load_lines', lambda _: [PAGE, other])
+    completed = threading.Event()
+    scanner_thread = threading.get_ident()
+    original = pipeline.FacebookScanner
+    if enhance:
+        enable_llm(harness, monkeypatch)
+        def improve(*args):
+            assert threading.get_ident() != scanner_thread
+            completed.set()
+            return {v.video_id: {'co_loi_noi': True, 'thoai': TEXT} for v in args[-1]}
+        monkeypatch.setattr(pipeline.llm_client, 'enhance_batch', improve)
+    def transcribe(video, *args):
+        assert threading.get_ident() != scanner_thread
+        video.transcript = TEXT
+        if not enhance:
+            completed.set()
+        return TEXT, 'ok'
+    monkeypatch.setattr(pipeline.transcript, 'get_transcript', transcribe)
+    class Scanner(original):
+        def scan_page(self, url, **kwargs):
+            assert threading.get_ident() == scanner_thread
+            if url == other:
+                assert completed.wait(5), 'Channel 1 must finish while channel 2 is scanning'
+                return [dict(harness.rows[0], video_id='2', url='https://example/2', views=200000)]
+            return harness.rows
+    monkeypatch.setattr(pipeline, 'FacebookScanner', Scanner)
+    result = pipeline.export_excel.read_summary(harness.run())
+    assert result['total'] == 1
+    assert db.get_taken('2')['status'] == 'taken'
+    assert db.get_taken('1')['status'] == 'duplicate_script'
+    events = [event for event in harness.events if event.stage == 'transcribe']
+    assert events[0].page_url == PAGE and events[-1].page_url == other
+
+
+def test_stop_during_next_scan_preserves_completed_transcription(harness, monkeypatch):
+    other = 'https://www.facebook.com/Other'
+    monkeypatch.setattr(config, 'load_lines', lambda _: [PAGE, other])
+    completed = threading.Event()
+    original = pipeline.FacebookScanner
+    second_started = threading.Event()
+    def transcribe(video, *args):
+        assert second_started.wait(5)
+        video.transcript = TEXT
+        completed.set()
+        harness.stop.set()
+        return TEXT, 'ok'
+    monkeypatch.setattr(pipeline.transcript, 'get_transcript', transcribe)
+    class Scanner(original):
+        def polite_page_pause(self, **kwargs):
+            pass
+        def scan_page(self, url, **kwargs):
+            if url == other:
+                second_started.set()
+                assert completed.wait(5)
+                return [dict(harness.rows[0], video_id='2')]
+            return harness.rows
+    monkeypatch.setattr(pipeline, 'FacebookScanner', Scanner)
+    result = pipeline.export_excel.read_summary(harness.run())
+    assert result['new'] == 1 and db.get_taken('2') is None
+    assert any('Đã dừng' in note for note in result['errors'])
+
+
+def test_only_known_old_metadata_can_be_skipped(harness, monkeypatch):
+    harness.rows = [
+        dict(harness.rows[0], video_id='old', posted_at=1, views=None),
+        dict(harness.rows[0], video_id='low', posted_at=None, views=100),
+        dict(harness.rows[0], video_id='high', views=100000),
+    ]
+    def fill(video):
+        harness.calls.append(('metadata', video.video_id))
+        video.posted_at = 1900000000
+    monkeypatch.setattr(pipeline.ytdlp, 'fill_missing', fill)
+    assert harness.run()
+    assert ('metadata', 'old') not in harness.calls
+    assert ('metadata', 'low') in harness.calls
+
+
+def test_stop_keeps_history_rows_from_already_scanned_channel(harness, monkeypatch):
+    config.ensure_dirs()
+    db.init_db()
+    db.save_taken(Video('2', 'https://example/2', PAGE, transcript=TEXT), 'taken', '2026-10-01')
+    harness.rows.append(dict(harness.rows[0], video_id='2', url='https://example/2', views=90000))
+    def transcribe(video, *args):
+        video.transcript = 'Kịch bản mới khác hẳn nội dung lưu trước để không bị lọc trùng.'
+        harness.stop.set()
+        return video.transcript, 'ok'
+    monkeypatch.setattr(pipeline.transcript, 'get_transcript', transcribe)
+    # Both videos must qualify independently of the channel median.
+    result = pipeline.export_excel.read_summary(pipeline.run(
+        pipeline.RunParams(viral_factor=0.5), config.DEFAULT_SETTINGS, harness.stop))
+    assert result['taken_before'] == 1 and result['new'] == 1
+
+
+def test_error_in_next_channel_exports_completed_overlap_work(harness, monkeypatch):
+    other = 'https://www.facebook.com/Other'
+    monkeypatch.setattr(config, 'load_lines', lambda _: [PAGE, other])
+    completed = threading.Event()
+    original = pipeline.FacebookScanner
+    def transcribe(video, *args):
+        video.transcript = TEXT
+        completed.set()
+        return TEXT, 'ok'
+    monkeypatch.setattr(pipeline.transcript, 'get_transcript', transcribe)
+    class Scanner(original):
+        def scan_page(self, url, **kwargs):
+            if url == other:
+                assert completed.wait(5)
+                raise ServiceError('facebook', 'lỗi kênh kế tiếp')
+            return harness.rows
+    monkeypatch.setattr(pipeline, 'FacebookScanner', Scanner)
+    result = pipeline.export_excel.read_summary(harness.run())
+    assert result['new'] == 1 and db.get_taken('1')['status'] == 'taken'
+    assert any('lỗi kênh kế tiếp' in message for message in result['errors'])
